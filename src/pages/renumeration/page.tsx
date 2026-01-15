@@ -1,3 +1,4 @@
+import type JSZip from 'jszip';
 import {
   ArrowLeft,
   ArrowRight,
@@ -7,17 +8,21 @@ import {
   Users,
 } from 'lucide-react';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import type { Faculty } from '@/types';
+
+import { readMetadataFaculty, readMetadataSlots } from '@/lib/renumeration';
 import { cn } from '@/lib/utils';
+import { loadZip } from '@/lib/zip';
 
 import { PWAPrompt } from '@/components/pwa-prompt';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Toaster } from '@/components/ui/sonner';
 
-import { AdditionalInfoPhase } from '@/pages/renumeration/phases/additional-info-phase';
 import { AdditionalAssignmentsPhase } from '@/pages/renumeration/phases/additional-assignments-phase';
+import { AdditionalInfoPhase } from '@/pages/renumeration/phases/additional-info-phase';
 import { ImportPhase } from '@/pages/renumeration/phases/import-phase';
 import { ReviewPhase } from '@/pages/renumeration/phases/review-phase';
 
@@ -27,6 +32,17 @@ export function RenumerationPage() {
   const [phase, setPhase] = useState<Phase>('import');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+
+  // Zip file state
+  const [zipInstance, setZipInstance] = useState<JSZip | null>(null);
+  const [zipFileName, setZipFileName] = useState<string | null>(null);
+  const [zipTimestamps, setZipTimestamps] = useState<{
+    updated?: string;
+    created?: string;
+  } | null>(null);
+
+  // Imported data state
+  const [facultyList, setFacultyList] = useState<Faculty[]>([]);
 
   const phases: Phase[] = ['import', 'info', 'assign', 'review'];
 
@@ -44,7 +60,8 @@ export function RenumerationPage() {
     // Placeholder logic; replace with actual completion checks
     switch (phase) {
       case 'import':
-        return true;
+        // Need to configure the additional checks we are running onImportZip
+        return zipInstance !== null;
       case 'info':
         return true;
       case 'assign':
@@ -70,6 +87,105 @@ export function RenumerationPage() {
     const prev = getPreviousPhase(phase);
     if (prev) setPhase(prev);
   }, [phase, getPreviousPhase]);
+
+  const onImportZip = useCallback(async (f: File | null) => {
+    if (!f) return;
+    setLoading(true);
+    try {
+      const zip = await loadZip(f);
+      setZipInstance(zip as any);
+      setZipFileName(f.name);
+      // persist ZIP in localStorage
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const dataUrl = reader.result as string;
+            localStorage.setItem('renumeration:zip:dataUrl', dataUrl);
+            localStorage.setItem('renumeration:zip:name', f.name);
+          } catch (err) {
+            console.warn('Failed to persist ZIP to localStorage', err);
+          }
+        };
+        reader.readAsDataURL(f);
+      } catch (err) {
+        console.warn('Failed to create data URL for ZIP', err);
+      }
+
+      // read last_modified timestamp
+      try {
+        const lm =
+          zip.file('last_modified.txt') ||
+          zip.file('internal/last_modified.txt');
+        if (lm) {
+          const text = await lm.async('string');
+          setZipTimestamps({ updated: text });
+        }
+      } catch (err) {
+        // ignore
+      }
+
+      // Extract data from ZIP
+      const meta = await readMetadataSlots(zip as any);
+      const facultyMeta = await readMetadataFaculty(zip as any);
+      if (facultyMeta && facultyMeta.length > 0) {
+        setFacultyList(facultyMeta);
+      }
+
+      // Run pre-flight to ensure all required information is present
+      try {
+        if (meta && meta.length > 0) {
+          // Extract Slots
+          // Ensure all slots have attendance records
+          // Check and Warn on any duties marked as Not Covered
+        }
+      } catch (err) {
+        console.warn('Failed to read metadata slots from zip', err);
+      }
+
+      // Ensure that all slots have subjectCodes and subjectNames configured
+
+      console.log('Loaded ZIP');
+    } catch (err) {
+      console.error('Failed to load ZIP', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const onZipReset = useCallback(() => {
+    // clear persisted zip and reset state
+    localStorage.removeItem('renumeration:zip:dataUrl');
+    localStorage.removeItem('renumeration:zip:name');
+    setZipInstance(null);
+    setZipFileName(null);
+    setZipTimestamps(null);
+    setPhase('import');
+  }, []);
+
+  // on mount, try to restore persisted zip from localStorage
+  useEffect(() => {
+    const dataUrl = localStorage.getItem('renumeration:zip:dataUrl');
+    const name = localStorage.getItem('renumeration:zip:name');
+    if (!dataUrl) return;
+    (async () => {
+      setLoading(true);
+      try {
+        const resp = await fetch(dataUrl);
+        const buffer = await resp.arrayBuffer();
+        const f = new File([buffer], name || 'attendance.zip', {
+          type: 'application/zip',
+        });
+        const zip = await loadZip(f);
+        setZipInstance(zip as any);
+        setZipFileName(name || 'attendance.zip');
+        // Restore state in a similar manner to onImportZip
+      } catch (err) {
+        console.warn('Failed to restore ZIP from storage', err);
+      }
+      setLoading(false);
+    })();
+  }, []);
 
   if (loading) {
     return (
@@ -172,7 +288,14 @@ export function RenumerationPage() {
 
       {/* Phase Content */}
       <main className="container mx-auto px-4 py-6">
-        {phase === 'import' && <ImportPhase />}
+        {phase === 'import' && (
+          <ImportPhase
+            zipFileName={zipFileName}
+            zipTimestamps={zipTimestamps}
+            onImport={onImportZip}
+            onReset={onZipReset}
+          />
+        )}
         {phase === 'info' && <AdditionalInfoPhase />}
         {phase === 'assign' && <AdditionalAssignmentsPhase />}
         {phase === 'review' && <ReviewPhase />}
