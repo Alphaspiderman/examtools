@@ -12,7 +12,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { Faculty } from '@/types';
 
-import { readMetadataFaculty, readMetadataSlots } from '@/lib/renumeration';
+import { readSlotAttendance } from '@/lib/renumeration';
+import { readTextFile } from '@/lib/zip';
 import { cn } from '@/lib/utils';
 import { loadZip } from '@/lib/zip';
 
@@ -43,6 +44,7 @@ export function RenumerationPage() {
 
   // Imported data state
   const [facultyList, setFacultyList] = useState<Faculty[]>([]);
+  const [importChecks, setImportChecks] = useState<any | null>(null);
 
   const phases: Phase[] = ['import', 'info', 'assign', 'review'];
 
@@ -125,33 +127,90 @@ export function RenumerationPage() {
         // ignore
       }
 
-      // Extract data from ZIP
-      const meta = await readMetadataSlots(zip as any);
-      const facultyMeta = await readMetadataFaculty(zip as any);
-      if (facultyMeta && facultyMeta.length > 0) {
-        setFacultyList(facultyMeta);
+      // Extract data from ZIP and run verification checks
+      const checks = await runImportChecks(zip as any);
+      setImportChecks(checks);
+      // populate faculty list if present
+      if (checks && checks.faculty && checks.faculty.length > 0) {
+        setFacultyList(checks.faculty);
       }
-
-      // Run pre-flight to ensure all required information is present
-      try {
-        if (meta && meta.length > 0) {
-          // Extract Slots
-          // Ensure all slots have attendance records
-          // Check and Warn on any duties marked as Not Covered
-        }
-      } catch (err) {
-        console.warn('Failed to read metadata slots from zip', err);
-      }
-
-      // Ensure that all slots have subjectCodes and subjectNames configured
-
       console.log('Loaded ZIP');
     } catch (err) {
       console.error('Failed to load ZIP', err);
+      setError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Run a set of verification checks against the zip's metadata
+  const runImportChecks = async (zip: JSZip) => {
+    const result: any = {
+      slotsFound: false,
+      slotsCount: 0,
+      facultyCount: 0,
+      missingAttendanceSlots: [] as Array<{ day: number; slot: number }>,
+      missingSubjectInfoSlots: [] as Array<{ day: number; slot: number; missing: string[] }>,
+      faculty: [] as Faculty[],
+    };
+
+    try {
+      const metaText =
+        (await readTextFile(zip as any, 'internal/metadata.json')) ||
+        (await readTextFile(zip as any, 'metadata.json'));
+      if (!metaText) return result;
+      const obj = JSON.parse(metaText);
+      const slots = Array.isArray(obj.slots)
+        ? obj.slots
+        : Array.isArray(obj.dutySlots)
+        ? obj.dutySlots
+        : [];
+      const facultyArr = Array.isArray(obj.faculty)
+        ? obj.faculty
+        : Array.isArray(obj.facultyList)
+        ? obj.facultyList
+        : [];
+
+      result.slotsFound = slots.length > 0;
+      result.slotsCount = slots.length;
+      result.facultyCount = facultyArr.length;
+      result.faculty = facultyArr.map((f: any, idx: number) => ({
+        sNo: Number(f.sNo || idx + 1),
+        facultyName: String(f.facultyName || ''),
+        facultyId: String(f.facultyId || ''),
+        designation: String(f.designation || ''),
+        department: String(f.department || ''),
+        phoneNo: String(f.phoneNo || ''),
+      }));
+
+      // Check each slot for attendance and subject info
+      await Promise.all(
+        slots.map(async (s: any) => {
+          const day = Number(s.day);
+          const slot = Number(s.slot);
+          try {
+            const att = await readSlotAttendance(zip as any, day, slot);
+            if (!att || !att.entries || att.entries.length === 0) {
+              result.missingAttendanceSlots.push({ day, slot });
+            }
+          } catch (err) {
+            result.missingAttendanceSlots.push({ day, slot });
+          }
+
+          const missing: string[] = [];
+          if (!s.subjectCode) missing.push('subjectCode');
+          if (!s.subjectNames && !s.subjectName) missing.push('subjectNames');
+          if (missing.length > 0) {
+            result.missingSubjectInfoSlots.push({ day, slot, missing });
+          }
+        })
+      );
+    } catch (err) {
+      console.warn('runImportChecks failed', err);
+    }
+
+    return result;
+  };
 
   const onZipReset = useCallback(() => {
     // clear persisted zip and reset state
@@ -180,6 +239,15 @@ export function RenumerationPage() {
         setZipInstance(zip as any);
         setZipFileName(name || 'attendance.zip');
         // Restore state in a similar manner to onImportZip
+        try {
+          const checks = await runImportChecks(zip as any);
+          setImportChecks(checks);
+          if (checks && checks.faculty && checks.faculty.length > 0) {
+            setFacultyList(checks.faculty);
+          }
+        } catch (err) {
+          console.warn('Failed to run import checks on restore', err);
+        }
       } catch (err) {
         console.warn('Failed to restore ZIP from storage', err);
       }
