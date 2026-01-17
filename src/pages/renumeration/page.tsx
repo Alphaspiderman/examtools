@@ -13,8 +13,8 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Faculty } from '@/types';
 
 import { readSlotAttendance } from '@/lib/renumeration';
-import { readTextFile } from '@/lib/zip';
 import { cn } from '@/lib/utils';
+import { readTextFile } from '@/lib/zip';
 import { loadZip } from '@/lib/zip';
 
 import { PWAPrompt } from '@/components/pwa-prompt';
@@ -150,7 +150,11 @@ export function RenumerationPage() {
       slotsCount: 0,
       facultyCount: 0,
       missingAttendanceSlots: [] as Array<{ day: number; slot: number }>,
-      missingSubjectInfoSlots: [] as Array<{ day: number; slot: number; missing: string[] }>,
+      missingSubjectInfoSlots: [] as Array<{
+        day: number;
+        slot: number;
+        missing: string[];
+      }>,
       faculty: [] as Faculty[],
     };
 
@@ -163,13 +167,13 @@ export function RenumerationPage() {
       const slots = Array.isArray(obj.slots)
         ? obj.slots
         : Array.isArray(obj.dutySlots)
-        ? obj.dutySlots
-        : [];
+          ? obj.dutySlots
+          : [];
       const facultyArr = Array.isArray(obj.faculty)
         ? obj.faculty
         : Array.isArray(obj.facultyList)
-        ? obj.facultyList
-        : [];
+          ? obj.facultyList
+          : [];
 
       result.slotsFound = slots.length > 0;
       result.slotsCount = slots.length;
@@ -219,6 +223,7 @@ export function RenumerationPage() {
     setZipInstance(null);
     setZipFileName(null);
     setZipTimestamps(null);
+    setImportChecks(null);
     setPhase('import');
   }, []);
 
@@ -362,6 +367,8 @@ export function RenumerationPage() {
             zipTimestamps={zipTimestamps}
             onImport={onImportZip}
             onReset={onZipReset}
+            checks={importChecks}
+            facultyList={facultyList}
           />
         )}
         {phase === 'info' && <AdditionalInfoPhase />}
