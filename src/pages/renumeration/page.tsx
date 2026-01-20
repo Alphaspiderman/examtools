@@ -127,8 +127,12 @@ export function RenumerationPage() {
         // ignore
       }
 
-      // Extract data from ZIP and run verification checks
-      const checks = await runImportChecks(zip as any);
+      // Extract data from ZIP and run verification checks with progressive updates
+      setImportChecks(null);
+      const checks = await runImportChecks(zip as any, (partial: any) => {
+        setImportChecks(partial);
+      });
+      // ensure final state is applied
       setImportChecks(checks);
       // populate faculty list if present
       if (checks && checks.faculty && checks.faculty.length > 0) {
@@ -144,7 +148,10 @@ export function RenumerationPage() {
   }, []);
 
   // Run a set of verification checks against the zip's metadata
-  const runImportChecks = async (zip: JSZip) => {
+  const runImportChecks = async (
+    zip: JSZip,
+    onProgress?: (partial: any) => void
+  ) => {
     const result: any = {
       slotsFound: false,
       slotsCount: 0,
@@ -156,14 +163,35 @@ export function RenumerationPage() {
         missing: string[];
       }>,
       faculty: [] as Faculty[],
+      progress: {
+        metadata: { state: 'pending', message: '' },
+        faculty: { state: 'pending', message: '' },
+        attendance: { state: 'pending', message: '' },
+        subjectInfo: { state: 'pending', message: '' },
+      },
     };
 
     try {
+      result.progress.metadata = {
+        state: 'processing',
+        message: 'Parsing metadata',
+      };
+      onProgress?.(result);
+
       const metaText =
         (await readTextFile(zip as any, 'internal/metadata.json')) ||
         (await readTextFile(zip as any, 'metadata.json'));
-      if (!metaText) return result;
+      if (!metaText) {
+        result.progress.metadata = {
+          state: 'failed',
+          message: 'No metadata found',
+        };
+        onProgress?.(result);
+        return result;
+      }
       const obj = JSON.parse(metaText);
+      result.progress.metadata = { state: 'done', message: 'Metadata parsed' };
+      onProgress?.(result);
       const slots = Array.isArray(obj.slots)
         ? obj.slots
         : Array.isArray(obj.dutySlots)
@@ -187,28 +215,66 @@ export function RenumerationPage() {
         phoneNo: String(f.phoneNo || ''),
       }));
 
-      // Check each slot for attendance and subject info
-      await Promise.all(
-        slots.map(async (s: any) => {
-          const day = Number(s.day);
-          const slot = Number(s.slot);
-          try {
-            const att = await readSlotAttendance(zip as any, day, slot);
-            if (!att || !att.entries || att.entries.length === 0) {
-              result.missingAttendanceSlots.push({ day, slot });
-            }
-          } catch (err) {
+      result.progress.faculty = {
+        state: 'done',
+        message: `${result.facultyCount} faculty entries`,
+      };
+      onProgress?.(result);
+
+      // Check each slot for attendance and subject info (sequentially to provide progress updates)
+      result.progress.attendance = {
+        state: 'processing',
+        message: 'Checking attendance',
+      };
+      result.progress.subjectInfo = {
+        state: 'processing',
+        message: 'Checking subject info',
+      };
+      onProgress?.(result);
+
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        const day = Number(s.day);
+        const slot = Number(s.slot);
+        result.progress.attendance = {
+          state: 'processing',
+          message: `Checking slot ${i + 1}/${slots.length} d${day}-s${slot}`,
+        };
+        result.progress.subjectInfo = {
+          state: 'processing',
+          message: `Checking slot ${i + 1}/${slots.length} d${day}-s${slot}`,
+        };
+        onProgress?.(result);
+
+        try {
+          const att = await readSlotAttendance(zip as any, day, slot);
+          if (!att || !att.entries || att.entries.length === 0) {
             result.missingAttendanceSlots.push({ day, slot });
           }
+        } catch (err) {
+          result.missingAttendanceSlots.push({ day, slot });
+        }
 
-          const missing: string[] = [];
-          if (!s.subjectCode) missing.push('subjectCode');
-          if (!s.subjectNames && !s.subjectName) missing.push('subjectNames');
-          if (missing.length > 0) {
-            result.missingSubjectInfoSlots.push({ day, slot, missing });
-          }
-        })
-      );
+        const missing: string[] = [];
+        if (!s.subjectCode) missing.push('subjectCode');
+        if (!s.subjectNames && !s.subjectName) missing.push('subjectNames');
+        if (missing.length > 0) {
+          result.missingSubjectInfoSlots.push({ day, slot, missing });
+        }
+
+        // emit progress after each slot
+        onProgress?.(result);
+      }
+
+      result.progress.attendance = {
+        state: 'done',
+        message: 'Attendance check complete',
+      };
+      result.progress.subjectInfo = {
+        state: 'done',
+        message: 'Subject info check complete',
+      };
+      onProgress?.(result);
     } catch (err) {
       console.warn('runImportChecks failed', err);
     }

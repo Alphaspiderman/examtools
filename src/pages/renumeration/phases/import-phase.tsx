@@ -1,4 +1,5 @@
 import { Check, CircleAlert, CircleDotDashed, Upload } from 'lucide-react';
+import { Spinner } from '@/components/ui/spinner';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -103,28 +104,46 @@ export function ImportPhase({
                 <li>
                   {checks == null ? (
                     <CircleDotDashed className="text-muted-foreground mr-2 inline-block size-4" />
+                  ) : checks.progress?.metadata?.state === 'processing' ? (
+                    <span className="mr-2 inline-block align-middle">
+                      <Spinner />
+                    </span>
                   ) : checks.slotsFound ? (
                     <Check className="mr-2 inline-block size-4 text-green-600" />
                   ) : (
                     <CircleAlert className="mr-2 inline-block size-4 text-red-600" />
                   )}
                   Slots found: {checks?.slotsCount ?? 'Pending'}
+                  {checks?.progress?.metadata?.state === 'processing' && (
+                    <span className="ml-2 text-xs text-muted-foreground">{checks.progress.metadata.message}</span>
+                  )}
                 </li>
 
                 <li>
                   {checks == null ? (
                     <CircleDotDashed className="text-muted-foreground mr-2 inline-block size-4" />
+                  ) : checks.progress?.faculty?.state === 'processing' ? (
+                    <span className="mr-2 inline-block align-middle">
+                      <Spinner />
+                    </span>
                   ) : checks.facultyCount && checks.facultyCount > 0 ? (
                     <Check className="mr-2 inline-block size-4 text-green-600" />
                   ) : (
                     <CircleAlert className="mr-2 inline-block size-4 text-red-600" />
                   )}
                   Faculty entries: {checks?.facultyCount ?? 'Pending'}
+                  {checks?.progress?.faculty?.state === 'processing' && (
+                    <span className="ml-2 text-xs text-muted-foreground">{checks.progress.faculty.message}</span>
+                  )}
                 </li>
 
                 <li>
                   {checks == null ? (
                     <CircleDotDashed className="text-muted-foreground mr-2 inline-block size-4" />
+                  ) : checks.progress?.attendance?.state === 'processing' ? (
+                    <span className="mr-2 inline-block align-middle">
+                      <Spinner />
+                    </span>
                   ) : checks.missingAttendanceSlots &&
                     checks.missingAttendanceSlots.length === 0 ? (
                     <Check className="mr-2 inline-block size-4 text-green-600" />
@@ -136,11 +155,18 @@ export function ImportPhase({
                     ? (checks.missingAttendanceSlots?.length ?? 0)
                     : 'Pending'}{' '}
                   missing
+                  {checks?.progress?.attendance?.state === 'processing' && (
+                    <span className="ml-2 text-xs text-muted-foreground">{checks.progress.attendance.message}</span>
+                  )}
                 </li>
 
                 <li>
                   {checks == null ? (
                     <CircleDotDashed className="text-muted-foreground mr-2 inline-block size-4" />
+                  ) : checks.progress?.subjectInfo?.state === 'processing' ? (
+                    <span className="mr-2 inline-block align-middle">
+                      <Spinner />
+                    </span>
                   ) : checks.missingSubjectInfoSlots &&
                     checks.missingSubjectInfoSlots.length === 0 ? (
                     <Check className="mr-2 inline-block size-4 text-green-600" />
@@ -152,6 +178,9 @@ export function ImportPhase({
                     ? (checks.missingSubjectInfoSlots?.length ?? 0)
                     : 'Pending'}{' '}
                   issues
+                  {checks?.progress?.subjectInfo?.state === 'processing' && (
+                    <span className="ml-2 text-xs text-muted-foreground">{checks.progress.subjectInfo.message}</span>
+                  )}
                 </li>
               </ul>
 
